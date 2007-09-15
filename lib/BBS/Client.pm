@@ -1,0 +1,477 @@
+package BBS::Client;
+use 5.008008;
+use strict;
+use warnings;
+use utf8;
+require Exporter;
+our @ISA = qw(Exporter);
+
+use Switch 'Perl6';
+use Encode;
+use Time::HiRes qw(usleep);
+use BBS::Client::Scheme;
+use Net::Telnet;
+
+# Items to export into callers namespace by default. Note: do not export
+# names by default without a very good reason. Use EXPORT_OK instead.
+# Do not simply export all your public functions/methods/constants.
+
+# This allows declaration	use BBS::Client ':all';
+# If you do not need this, moving things directly into @EXPORT or @EXPORT_OK
+# will save memory.
+our %EXPORT_TAGS = ( 'all' => [ qw( ) ] );
+our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
+our @EXPORT = qw( );
+our $VERSION = '0.01';
+
+BEGIN 
+{
+	print "LOADING...\n";
+}
+
+my $esc = chr(27);
+my $buffer_delay = 1*10**5;
+my $buffer_timeout = 10;
+$|=1;
+binmode STDOUT , ":utf8";
+
+sub new 
+{
+	my ($class,$ego) = @_;
+	given( $ego->{sys} ) {
+		when 'bs2' {
+			$ego->{prompt} = \%BBS::Client::Scheme::bs2_scheme; # Prompt Scheme
+			$ego->{cmd} = \%BBS::Client::Scheme::bs2_cmd_scheme; # Command Scheme
+		}
+		when 'ptt' {
+			$ego->{prompt} = \%BBS::Client::Scheme::ptt_scheme; # Prompt Scheme
+			$ego->{cmd} = \%BBS::Client::Scheme::ptt_cmd_scheme; # Command Scheme
+		}
+		when 'sayya' {
+			$ego->{prompt} = \%BBS::Client::Scheme::sayya_scheme; # Prompt Scheme
+			$ego->{cmd} = \%BBS::Client::Scheme::sayya_cmd_scheme; # Command Scheme
+		}
+		default {
+			$ego->{prompt} = \%BBS::Client::Scheme::bs2_scheme; # Prompt Scheme
+			$ego->{cmd} = \%BBS::Client::Scheme::bs2_cmd_scheme; # Command Scheme
+		}
+	}
+	bless $ego , $class;
+	$ego->init();
+	return $ego;
+}
+
+# private method declaration
+sub sendkey {
+	my $ego = shift;
+	my $key = shift;
+	$ego->{t}->put( $key );
+}
+
+sub dump_buffer 
+{
+	my $ego = shift;
+	my $tmp = shift;
+	$tmp =~ s/\r//g;
+	$tmp =~ s/$esc\[/\*\[/g;
+	print "\n=============================\n";
+	print decode('big5',$tmp);
+	print "\n=============================\n";
+}
+
+
+sub dump
+{
+	my $ego = shift;
+	my $tmp = $ego->{t}->get();
+	$tmp =~ s/\r//g;
+	$tmp =~ s/$esc\[/\*\[/g;
+	print "\n=============================\n";
+	print decode('big5',$tmp);
+	print "\n=============================\n";
+}
+
+
+sub getscreen {
+	my $ego = shift;
+	usleep( $buffer_delay );
+	my $str = $ego->{t}->get( Timeout => $buffer_timeout );
+	print $str = decode('Big5',$str);
+	return $str;
+}
+
+sub init
+{
+	my $ego = shift;
+	$ego->{t} = Net::Telnet->new(
+			Port => 23,
+			Timeout => 30,
+			Errmode => \&error
+			);
+	$ego->{t}->open( $ego->{host} );
+}
+
+sub prepare_dir
+{
+	my $ego = shift;
+	mkdir("./$ego->{host}/") unless(-d "./$ego->{host}");
+	mkdir("./$ego->{host}/$ego->{board}") unless(-d "./$ego->{host}/$ego->{board}");
+}
+
+sub fetch_article_content {
+	my $ego = shift;
+	my $buf = '';
+	my $out = '';
+	my $p = 1;
+	my $l = 1;
+	my $esc_jump_ptn = qr{$esc\[(\d+);1H};
+
+	my $buf2='';
+	my $last_endline = 0;
+	my $do_cut = 0;
+	while( my $str = $ego->{t}->get() ) {
+		#$ego->dump_buffer( $str );
+		$buf2 .= $str;
+
+		my $buf_de = decode('Big5',$buf2);
+		if( $buf_de =~ $ego->{prompt}{browse_bar} ) {
+			print "($1)\r";
+			$ego->sendkey( $ego->{cmd}{next_page} );
+			$buf .= $buf2;
+			$buf2 ='';
+		} elsif( $buf_de =~ $ego->{prompt}{browse_bar_finish} ) {
+			$buf .= $buf2;
+			$buf2 ='';
+			$buf = decode('Big5',$buf);
+			last;
+		} elsif( $buf_de =~ $ego->{prompt}{article_no_content} ) {
+			print "no content        \n";
+			$ego->sendkey(" j\n");
+			return ' ';
+		}
+	} 
+
+	my @lines = split( /\n/ ,$buf);
+	for my $index ( 0 .. $#lines ) {
+		my $line = $lines[ $index ];
+		
+		# find control char
+		# $do_cut = 1 if( $str =~ s/$esc\[H$esc\[J//g );  # do cut
+		while ( $line =~ $esc_jump_ptn ) {
+			my $blank = '';
+			for( $l+1 .. $1 ) { $blank .= "\n" }
+			$l = $1;
+			$line =~ s/$esc_jump_ptn/$blank/;
+		}
+
+		if ( $line eq '' ) {
+			--$l;
+		} else {
+			$line =~ s/$ego->{prompt}{'browse_bar'}//g;
+			$line =~ s/$ego->{prompt}{'browse_bar_finish'}//g;
+			++$l;
+			$out .= $line . "\n";
+		}
+	}
+
+	$out =~ s/($esc\[K
+				|\r
+				|$esc\[(\d*?;?)*m
+				|^$esc\[;H$esc\[2J
+			)//gx;
+	return $out;
+}
+
+
+# public method declaration
+sub login 
+{
+	my $ego = shift;
+	my $user = shift;
+	my $pass = shift;
+	my $buf = '';
+	while( my $str = $ego->{t}->get() ) {
+		$buf .= $str;
+		my $buf_de = decode('Big5' , $buf );
+		if ( $buf_de =~ $ego->{prompt}{userid} ) {
+			$ego->sendkey( $user."\n");
+			$buf = '';
+		} elsif( $buf_de =~ $ego->{prompt}{passwd} ) {
+			$ego->sendkey( $pass."\n");
+			$buf = '';
+		} elsif(  $buf_de =~ $ego->{prompt}{repeat_login}  ) {
+			$ego->sendkey( "n\n" );
+			$buf = '';
+		} elsif( $buf_de =~ $ego->{prompt}{press_any_key} ) {
+			$ego->sendkey( $ego->{cmd}{quit} );
+			$buf = '';
+		} elsif( $buf_de =~ $ego->{prompt}{hotboards} ) {
+			$ego->sendkey( $ego->{cmd}{quit});
+			$buf = '';
+		} elsif( $buf_de =~ $ego->{prompt}{main_menu} ) {
+			print "get main menu\n";
+			$buf = '';
+			return 1;
+		} elsif( $buf_de =~ $ego->{prompt}{wrong_userid} ) {
+			print "wrong userid\n";
+			$buf = '';
+			return 0;
+		} elsif( $buf_de =~ $ego->{prompt}{wrong_passwd} ) {
+			print "wrong password\n";
+			$buf = '';
+			return 0;
+		} elsif( $buf_de =~ /您有一篇文章尚未完成/ ) {
+			$ego->sendkey("q\n"); # forget it
+			$buf = '';
+		}
+	}
+}
+
+sub enter_board {
+	my $ego = shift;
+	my $board = shift;
+	$ego->{board}=$board;
+	$ego->prepare_dir();
+
+	$ego->sendkey( $ego->{cmd}{search_board} . $board . "\n");
+	my $buf = '';
+	while( my $str = $ego->{t}->get() ) {
+		$buf .= $str;
+		my $buf_de = decode('big5' , $buf );
+		if ( $buf_de =~ $ego->{prompt}{press_any_key} ) {
+			$ego->sendkey( $ego->{cmd}{quit} );
+			$buf = '';
+		}  elsif( $buf_de =~ $ego->{prompt}{article_list} )  {
+			$buf = '';
+			return 1;
+		}
+	}
+}
+
+sub fetch_articles {
+	my ( $ego , $start , $end ) = @_;
+	$ego->prepare_dir();
+	$ego->sendkey( "$start\n\n" );
+	for my $index ( $start .. $end ) {
+
+		print "      fetching item $index...\r";
+		my $c = $ego->fetch_article_content();
+		$ego->sendkey( $ego->{cmd}{next_page} ); 
+
+		open FH , sprintf("> ./%s/%s/%d.txt" , $ego->{host} , $ego->{board} , $index );
+		binmode FH , ":utf8";
+		print FH $c;
+		close FH;
+		print "item $index saved.            \n";
+
+	}
+	print "done. :)\n";
+	$ego->sendkey( $ego->{cmd}{quit} );
+}
+
+sub offline 
+{
+	my $ego = shift;
+	$ego->{t}->close();
+}
+
+
+# 
+# User list
+sub enter_userlist
+{
+	my $ego = shift;
+	$ego->sendkey( $ego->{cmd}->{userlist_show} );  # <Ctrl-U> <Tab> <4> <Enter>
+}
+
+sub listen_userlist 
+{
+	my $ego = shift;
+	my %all_ids;
+	my %cur_ids;
+	my %last_ids;
+	my $timestamp;
+	print "mkdir..\n";
+	my $level = 0;
+	my %pad_ids;
+
+	$ego->prepare_dir();
+	while(1) 
+	{
+		my $screen = '';
+		my $buf = '';
+
+		# send update key
+		usleep(3*10**5);
+		$ego->sendkey("s");
+
+		while( my $str = $ego->{t}->get() ) { # fetch screen
+			$buf .= $str;
+			# $ego->dump_buffer( $str );
+			my $buf_de = decode('Big5',$buf );
+			if( $buf_de =~ $ego->{prompt}{userlist_bar} ){
+				$screen = $buf_de;
+				last;
+			}
+		}
+
+
+		# add id to current id list 
+		while( $screen =~ m{$ego->{prompt}{userlist_board_friend}}g )
+		{ 
+			my ( $gid , $gnick )=( $1, $2);
+			if ( ! exists( $all_ids{$gid} ) ) {
+				$all_ids{$gid} = 1;
+				print "new guest found \@ $ego->{board} : $gid ( $gnick ) \n";
+				open FH , ">> ./$ego->{host}/$ego->{board}.log";
+				binmode FH , ":utf8";
+				print FH "$gid - $gnick \n";
+				close FH;
+			}
+			$cur_ids{$gid}=1;
+		} 
+
+
+		# update timestamp at first time	
+		$timestamp = time() if ( ! $timestamp );
+		if( time() - $timestamp > 2 )	# update current id list to last id list ( every 2 sec )
+		{
+			$timestamp = time();
+			use POSIX qw(strftime);
+			my $now_string = strftime "%a %b %e %H:%M:%S %Y", localtime;
+
+			# compare with last id list
+			foreach my $id ( keys %cur_ids )  # find new join visitors and existed visitors
+			{ 
+				unless( $last_ids{ $id } ) {
+					# new join
+					$pad_ids{ $id } = $level;
+					for( 0 .. $pad_ids{ $id } ) { print "---|" ; }
+					print "  $id enter at $now_string  " . $all_ids{$id} . " times. \n";
+					$all_ids{$id}++;
+					$level++;
+				}
+			}
+
+			foreach my $id ( keys %last_ids ) 
+			{
+				unless ( $cur_ids{ $id } ) { 
+					for( 0 .. $pad_ids{ $id } ) { print "   |" ; }
+					print "- $id leave at: $now_string \n";
+					$level--;
+				}
+			}
+			
+			# update last id list
+			%last_ids = %cur_ids;
+			foreach my $h ( keys %cur_ids ) { delete $cur_ids{$h}; }
+
+		}
+	}
+}
+
+sub wait_for
+{
+	my $ego = shift;
+	my $pattern = shift;
+	my $buf = '';
+	while( my $str = $ego->{t}->get() ) {
+		$buf .= $str;
+#		$ego->dump_buffer( $str );
+		my $buf2 = decode('Big5',$buf);
+		if( $buf2 =~ m{$pattern} ) {
+			return 1;
+		}
+	}
+}
+
+sub post_article
+{
+	my ($ego,$title,$content) = @_;
+	
+	# send post command	
+	$ego->sendkey(  $ego->{cmd}{article_post} );
+
+	# make sure that we are going to post text
+	return unless ( $ego->wait_for( $ego->{prompt}{article_ask_label} ) );
+
+	# skip label
+	$ego->sendkey("\n");
+	
+	# send title
+	usleep( 2 * 10 ** 5 );
+	$ego->sendkey( $title . "\n" );
+	
+	# signature
+	$ego->sendkey("\n");
+	usleep( 2 * 10 ** 5 );
+	$ego->sendkey($content);
+	
+	usleep( 5 * 10 ** 5 );
+	$ego->sendkey(  $ego->{cmd}{article_menu} );
+	
+	usleep( 2 * 10 ** 5 );
+	$ego->sendkey(  $ego->{cmd}{article_save} );
+	
+	usleep( 2 * 10 ** 5 );
+	$ego->sendkey( $ego->{cmd}{next_page} );
+	#$ego->dump();
+	#return unless ( $ego->wait_for( $ego->{prompt}{article_posted} ) );
+
+	1;
+}
+
+sub error 
+{
+	print "error\n";
+	exit;
+}
+1;
+__END__
+
+# Below is stub documentation for your module. You'd better edit it!
+
+=head1 NAME
+
+BBS::Client - A Client Module For BBS
+
+=head1 SYNOPSIS
+
+	use BBS::Client;
+	my $o = BBS::Client->new( {
+			host => 'bs2.to',
+			sys =>  'bs2' ,  # system type ( ptt or maple )
+			});
+
+	if( $o->login($user,$pass) ) {
+		$o->enter_board($board);
+		$o->fetch_articles( $start , $end );
+	} else {
+		print "failed..\n";
+	}
+
+=head1 DESCRIPTION
+
+To connect with BBS systems to backup articles , I wrote this
+module , which is implemented with Net::Telnet.  You can fetch
+articles from BBS Systems , such like ptt.cc , ptt2.cc and bs2.to
+
+This module works on different BBS Systems by given specific scheme
+to emit corresponding behaviors. You can also add your scheme to 
+this module. ( BBS::Client::Scheme )
+
+=head1 SEE ALSO
+
+Net::Telnet
+
+=head1 AUTHOR
+
+Cornelius, E<lt>cornelius.howl@gmail.com<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2007 by Cornelius
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.8.8 or,
+at your option, any later version of Perl 5 you may have available.
