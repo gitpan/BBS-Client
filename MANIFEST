@@ -3,5 +3,6 @@ Makefile.PL
 MANIFEST
 README
 t/BBS-Client.t
+lib/BBS/Client/Scheme.pm
 lib/BBS/Client.pm
 META.yml                                 Module meta-data (added by MakeMaker)

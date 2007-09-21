@@ -17,9 +17,9 @@ WriteMakefile(
 				Net::Telnet => 0 ,
 				Text::Iconv => 0 ,
 				Lingua::ZH::Wrap => 0 ,
-		}, # e.g., Module::Name => 1.1
+		}, 
     EXE_FILES       => [ <script/*> ],
-#    ($] >= 5.005 ?     ## Add these new keywords supported since 5.005
-#      (ABSTRACT_FROM  => 'lib/BBS/Client.pod', # retrieve abstract from module
-#       AUTHOR         => 'Cornelius <cornelius.howl@gmail.com>') : ()),
+    ($] >= 5.005 ?     ## Add these new keywords supported since 5.005
+      (ABSTRACT_FROM  => 'lib/BBS/Client.pm', # retrieve abstract from module
+       AUTHOR         => 'Cornelius <cornelius.howl@gmail.com>') : ()),
 );

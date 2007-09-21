@@ -1,5 +1,8 @@
 Revision history for Perl extension BBS::Client.
 
+0.02  2007 Sep 20 12:56:37 AM
+	- have added some feature like 
+
 0.01  Tue Sep 11 00:28:24 2007
 	- original version; created by h2xs 1.23 with options
 		-AX BBS::Client

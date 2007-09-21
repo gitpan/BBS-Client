@@ -9,8 +9,9 @@ our @ISA = qw(Exporter);
 use Switch 'Perl6';
 use Encode;
 use Time::HiRes qw(usleep);
-use BBS::Client::Scheme;
 use Net::Telnet;
+use BBS::Client::Scheme;
+use BBS::Client::Userlist;
 
 # Items to export into callers namespace by default. Note: do not export
 # names by default without a very good reason. Use EXPORT_OK instead.
@@ -22,12 +23,11 @@ use Net::Telnet;
 our %EXPORT_TAGS = ( 'all' => [ qw( ) ] );
 our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 our @EXPORT = qw( );
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
-BEGIN 
-{
-	print "LOADING...\n";
-}
+BEGIN {
+
+	}
 
 my $esc = chr(27);
 my $buffer_delay = 1*10**5;
@@ -38,31 +38,39 @@ binmode STDOUT , ":utf8";
 sub new 
 {
 	my ($class,$ego) = @_;
-	given( $ego->{sys} ) {
-		when 'bs2' {
-			$ego->{prompt} = \%BBS::Client::Scheme::bs2_scheme; # Prompt Scheme
-			$ego->{cmd} = \%BBS::Client::Scheme::bs2_cmd_scheme; # Command Scheme
-		}
-		when 'ptt' {
-			$ego->{prompt} = \%BBS::Client::Scheme::ptt_scheme; # Prompt Scheme
-			$ego->{cmd} = \%BBS::Client::Scheme::ptt_cmd_scheme; # Command Scheme
-		}
-		when 'sayya' {
-			$ego->{prompt} = \%BBS::Client::Scheme::sayya_scheme; # Prompt Scheme
-			$ego->{cmd} = \%BBS::Client::Scheme::sayya_cmd_scheme; # Command Scheme
-		}
-		default {
-			$ego->{prompt} = \%BBS::Client::Scheme::bs2_scheme; # Prompt Scheme
-			$ego->{cmd} = \%BBS::Client::Scheme::bs2_cmd_scheme; # Command Scheme
-		}
-	}
 	bless $ego , $class;
+	$ego->scheme();
 	$ego->init();
 	return $ego;
 }
 
+
+sub scheme {
+	my $ego = shift;
+	# my $scheme_name = shift || 'bs2';
+	given( $ego->{sys} ) {
+		when 'bs2' {
+			$ego->{prompt} = \%BBS::Client::Scheme::bs2_scheme; 
+			$ego->{cmd} = \%BBS::Client::Scheme::bs2_cmd_scheme; 
+		}
+		when 'ptt' {
+			$ego->{prompt} = \%BBS::Client::Scheme::ptt_scheme; 
+			$ego->{cmd} = \%BBS::Client::Scheme::ptt_cmd_scheme;
+		}
+		when 'sayya' {
+			$ego->{prompt} = \%BBS::Client::Scheme::sayya_scheme; 
+			$ego->{cmd} = \%BBS::Client::Scheme::sayya_cmd_scheme; 
+		}
+		default {
+			$ego->{prompt} = \%BBS::Client::Scheme::bs2_scheme; 
+			$ego->{cmd} = \%BBS::Client::Scheme::bs2_cmd_scheme; 
+		}
+	}
+}
+
 # private method declaration
-sub sendkey {
+sub sendkey 
+{
 	my $ego = shift;
 	my $key = shift;
 	$ego->{t}->put( $key );
@@ -92,7 +100,8 @@ sub dump
 }
 
 
-sub getscreen {
+sub getscreen 
+{
 	my $ego = shift;
 	usleep( $buffer_delay );
 	my $str = $ego->{t}->get( Timeout => $buffer_timeout );
@@ -114,8 +123,9 @@ sub init
 sub prepare_dir
 {
 	my $ego = shift;
-	mkdir("./$ego->{host}/") unless(-d "./$ego->{host}");
-	mkdir("./$ego->{host}/$ego->{board}") unless(-d "./$ego->{host}/$ego->{board}");
+	mkdir( $ENV{HOME} . "/BBS" );
+	mkdir( $ENV{HOME} . "/BBS/$ego->{host}/") unless(-d "./$ego->{host}");
+	mkdir( $ENV{HOME} . "/BBS/$ego->{host}/$ego->{board}") unless(-d "./$ego->{host}/$ego->{board}");
 }
 
 sub fetch_article_content {
@@ -130,9 +140,7 @@ sub fetch_article_content {
 	my $last_endline = 0;
 	my $do_cut = 0;
 	while( my $str = $ego->{t}->get() ) {
-		#$ego->dump_buffer( $str );
 		$buf2 .= $str;
-
 		my $buf_de = decode('Big5',$buf2);
 		if( $buf_de =~ $ego->{prompt}{browse_bar} ) {
 			print "($1)\r";
@@ -152,16 +160,15 @@ sub fetch_article_content {
 	} 
 
 	my @lines = split( /\n/ ,$buf);
-	for my $index ( 0 .. $#lines ) {
+	for my $index ( 0 .. $#lines ) 
+	{
 		my $line = $lines[ $index ];
-		
 		# find control char
-		# $do_cut = 1 if( $str =~ s/$esc\[H$esc\[J//g );  # do cut
 		while ( $line =~ $esc_jump_ptn ) {
-			my $blank = '';
-			for( $l+1 .. $1 ) { $blank .= "\n" }
+			my $blankline = '';
+			for( $l+1 .. $1 ) { $blankline .= "\n" }
 			$l = $1;
-			$line =~ s/$esc_jump_ptn/$blank/;
+			$line =~ s/$esc_jump_ptn/$blankline/;
 		}
 
 		if ( $line eq '' ) {
@@ -173,7 +180,6 @@ sub fetch_article_content {
 			$out .= $line . "\n";
 		}
 	}
-
 	$out =~ s/($esc\[K
 				|\r
 				|$esc\[(\d*?;?)*m
@@ -191,48 +197,56 @@ sub login
 	my $pass = shift;
 	my $buf = '';
 	while( my $str = $ego->{t}->get() ) {
-		$buf .= $str;
-		my $buf_de = decode('Big5' , $buf );
+
+		my $buf_de = decode('Big5' , $buf .= $str );
+
 		if ( $buf_de =~ $ego->{prompt}{userid} ) {
 			$ego->sendkey( $user."\n");
 			$buf = '';
-		} elsif( $buf_de =~ $ego->{prompt}{passwd} ) {
+		} 
+		elsif( $buf_de =~ $ego->{prompt}{passwd} ) {
 			$ego->sendkey( $pass."\n");
 			$buf = '';
-		} elsif(  $buf_de =~ $ego->{prompt}{repeat_login}  ) {
+		} 
+		elsif(  $buf_de =~ $ego->{prompt}{repeat_login}  ) {
 			$ego->sendkey( "n\n" );
 			$buf = '';
-		} elsif( $buf_de =~ $ego->{prompt}{press_any_key} ) {
+		} 
+		elsif( $buf_de =~ $ego->{prompt}{press_any_key} ) {
 			$ego->sendkey( $ego->{cmd}{quit} );
 			$buf = '';
-		} elsif( $buf_de =~ $ego->{prompt}{hotboards} ) {
+		} 
+		elsif( $buf_de =~ $ego->{prompt}{hotboards} ) {
 			$ego->sendkey( $ego->{cmd}{quit});
 			$buf = '';
-		} elsif( $buf_de =~ $ego->{prompt}{main_menu} ) {
+		} 
+		elsif( $buf_de =~ $ego->{prompt}{main_menu} ) {
 			print "get main menu\n";
 			$buf = '';
 			return 1;
-		} elsif( $buf_de =~ $ego->{prompt}{wrong_userid} ) {
+		} 
+		elsif( $buf_de =~ $ego->{prompt}{wrong_userid} ) {
 			print "wrong userid\n";
 			$buf = '';
 			return 0;
-		} elsif( $buf_de =~ $ego->{prompt}{wrong_passwd} ) {
+		} 
+		elsif( $buf_de =~ $ego->{prompt}{wrong_passwd} ) {
 			print "wrong password\n";
 			$buf = '';
 			return 0;
-		} elsif( $buf_de =~ /您有一篇文章尚未完成/ ) {
+		} 
+		elsif( $buf_de =~ m/您有.+?篇文章尚未完成/ ) {
 			$ego->sendkey("q\n"); # forget it
 			$buf = '';
 		}
 	}
 }
 
-sub enter_board {
+sub enter_board 
+{
 	my $ego = shift;
 	my $board = shift;
 	$ego->{board}=$board;
-	$ego->prepare_dir();
-
 	$ego->sendkey( $ego->{cmd}{search_board} . $board . "\n");
 	my $buf = '';
 	while( my $str = $ego->{t}->get() ) {
@@ -248,7 +262,8 @@ sub enter_board {
 	}
 }
 
-sub fetch_articles {
+sub fetch_articles 
+{
 	my ( $ego , $start , $end ) = @_;
 	$ego->prepare_dir();
 	$ego->sendkey( "$start\n\n" );
@@ -284,6 +299,30 @@ sub enter_userlist
 	$ego->sendkey( $ego->{cmd}->{userlist_show} );  # <Ctrl-U> <Tab> <4> <Enter>
 }
 
+
+sub read_screen
+{
+	my ( $ego , $pattern ) = @_; 		# pattern to stop read
+	my $buf = '';
+	while( my $str = $ego->{t}->get() ) { 		# fetch screen
+		$buf .= $str;
+		my $buf_de = decode('Big5',$buf );
+		return $buf_de if( $buf_de =~ m{$pattern} );
+	}
+}
+
+sub userlist_write_log 
+{
+	my $ego = shift;
+	my $action = shift;
+	my %user = @_;
+	my $log_filename = $ENV{HOME} . "/$ego->{host}/$ego->{board}.log";
+	open FH , ">>" , $log_filename ;
+	binmode FH , ":utf8";
+	print FH "$action : $user{ID} - $user{NICK} \n";
+	close FH;
+}
+
 sub listen_userlist 
 {
 	my $ego = shift;
@@ -291,30 +330,16 @@ sub listen_userlist
 	my %cur_ids;
 	my %last_ids;
 	my $timestamp;
-	print "mkdir..\n";
 	my $level = 0;
 	my %pad_ids;
 
-	$ego->prepare_dir();
 	while(1) 
 	{
-		my $screen = '';
-		my $buf = '';
-
 		# send update key
 		usleep(3*10**5);
 		$ego->sendkey("s");
 
-		while( my $str = $ego->{t}->get() ) { # fetch screen
-			$buf .= $str;
-			# $ego->dump_buffer( $str );
-			my $buf_de = decode('Big5',$buf );
-			if( $buf_de =~ $ego->{prompt}{userlist_bar} ){
-				$screen = $buf_de;
-				last;
-			}
-		}
-
+		my $screen = $ego->read_screen( $ego->{prompt}{userlist_bar} );
 
 		# add id to current id list 
 		while( $screen =~ m{$ego->{prompt}{userlist_board_friend}}g )
@@ -322,11 +347,11 @@ sub listen_userlist
 			my ( $gid , $gnick )=( $1, $2);
 			if ( ! exists( $all_ids{$gid} ) ) {
 				$all_ids{$gid} = 1;
+				$ego->userlist_write_log( 
+					'new guest' , 
+					( 'ID' => $gid , 'NICK' => $gnick )
+				);
 				print "new guest found \@ $ego->{board} : $gid ( $gnick ) \n";
-				open FH , ">> ./$ego->{host}/$ego->{board}.log";
-				binmode FH , ":utf8";
-				print FH "$gid - $gnick \n";
-				close FH;
 			}
 			$cur_ids{$gid}=1;
 		} 
@@ -377,13 +402,30 @@ sub wait_for
 	my $buf = '';
 	while( my $str = $ego->{t}->get() ) {
 		$buf .= $str;
-#		$ego->dump_buffer( $str );
 		my $buf2 = decode('Big5',$buf);
 		if( $buf2 =~ m{$pattern} ) {
 			return 1;
 		}
 	}
 }
+
+sub conv_utf8_to_big5
+{
+	my ($ego,$c) = @_;
+
+	# check if content is utf8 encoding
+	if( utf8::is_utf8( $c ) {
+		# convert encoding from utf8 to big5
+		# because BBS sytem use big5 encoding
+		my $enc = Text::Iconv->new("utf8", "big5");
+		my $content_big5 = $enc->convert( $c );
+		return if( $enc->retval );
+		return $content_big5;
+	} else {
+		return $c;
+	}
+}
+
 
 sub post_article
 {
@@ -433,7 +475,7 @@ __END__
 
 =head1 NAME
 
-BBS::Client - A Client Module For BBS
+BBS::Client - A Client Module For BBS Systems
 
 =head1 SYNOPSIS
 
@@ -444,10 +486,14 @@ BBS::Client - A Client Module For BBS
 			});
 
 	if( $o->login($user,$pass) ) {
+
 		$o->enter_board($board);
 		$o->fetch_articles( $start , $end );
+
 	} else {
+
 		print "failed..\n";
+
 	}
 
 =head1 DESCRIPTION
@@ -466,7 +512,7 @@ Net::Telnet
 
 =head1 AUTHOR
 
-Cornelius, E<lt>cornelius.howl@gmail.com<gt>
+Cornelius, E<lt>cornelius.howl@gmail.comE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
