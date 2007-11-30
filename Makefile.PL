@@ -17,6 +17,9 @@ WriteMakefile(
 				Net::Telnet => 0 ,
 				Text::Iconv => 0 ,
 				Lingua::ZH::Wrap => 0 ,
+                Switch  => 0,
+                Encode => 0,
+                POSIX => 0,
 		}, 
     EXE_FILES       => [ <script/*> ],
     ($] >= 5.005 ?     ## Add these new keywords supported since 5.005

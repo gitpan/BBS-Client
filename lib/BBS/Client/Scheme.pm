@@ -12,6 +12,7 @@ our %bs2_scheme = (
 	'press_any_key' 	=> qr/請按.*?任意鍵.*?繼續/,
 	'repeat_login' 		=> qr/您想踢掉其他重複的 login.*?嗎？/,
 	'hotboards' 		=> qr/熱門看板排行榜/,
+	'guestbook'			=> qr/酸 甜 苦 辣 留 言 板/,
 	'main_menu' 		=> qr/主功能表/,
 	'wrong_userid' 		=> qr/錯誤的使用者代號/,
 	'wrong_passwd' 		=> qr/密碼輸入錯誤/,
@@ -23,6 +24,7 @@ our %bs2_scheme = (
 	'article_posted'	=> qr/順利貼出文章/,
 	'browse_bar' 		=> qr/瀏覽 P\.(\d+)/,
 	'browse_bar_finish' => qr/文章選讀/,
+	'incomplete_article'=> qr/您有.+?篇文章尚未完成/,
 
 # Userlist
 	'userlist_bar' 			=> qr{46m 網友列表},

@@ -2,6 +2,8 @@ Changes
 Makefile.PL
 MANIFEST
 README
+script/bbs_get.pl
+script/bbs_listen.pl
 t/BBS-Client.t
 lib/BBS/Client/Scheme.pm
 lib/BBS/Client.pm

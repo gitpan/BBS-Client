@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                BBS-Client
-version:             0.02
+version:             0.03
 abstract:            BBS Client
 license:             ~
 generated_by:        ExtUtils::MakeMaker version 6.36
@@ -9,6 +9,8 @@ requires:
     Encode:                        0
     Lingua::ZH::Wrap:              0
     Net::Telnet:                   0
+    POSIX:                         0
+    Switch:                        0
     Text::Iconv:                   0
     Time::HiRes:                   0
 meta-spec:

@@ -11,27 +11,20 @@ use Encode;
 use Time::HiRes qw(usleep);
 use Net::Telnet;
 use BBS::Client::Scheme;
-use BBS::Client::Userlist;
+use POSIX qw(strftime);
 
-# Items to export into callers namespace by default. Note: do not export
-# names by default without a very good reason. Use EXPORT_OK instead.
-# Do not simply export all your public functions/methods/constants.
+use constant BUF_DELAY => 1*10**5;
+use constant BUF_TIMEOUT => 10;
 
-# This allows declaration	use BBS::Client ':all';
-# If you do not need this, moving things directly into @EXPORT or @EXPORT_OK
-# will save memory.
 our %EXPORT_TAGS = ( 'all' => [ qw( ) ] );
 our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 our @EXPORT = qw( );
-our $VERSION = '0.02';
 
-BEGIN {
-
-	}
+our $VERSION = '0.03';
 
 my $esc = chr(27);
-my $buffer_delay = 1*10**5;
-my $buffer_timeout = 10;
+
+
 $|=1;
 binmode STDOUT , ":utf8";
 
@@ -71,15 +64,14 @@ sub scheme {
 # private method declaration
 sub sendkey 
 {
-	my $ego = shift;
-	my $key = shift;
+	my ($ego,$key) = @_;
 	$ego->{t}->put( $key );
 }
 
+
 sub dump_buffer 
 {
-	my $ego = shift;
-	my $tmp = shift;
+	my ($ego,$tmp) = @_;
 	$tmp =~ s/\r//g;
 	$tmp =~ s/$esc\[/\*\[/g;
 	print "\n=============================\n";
@@ -88,23 +80,22 @@ sub dump_buffer
 }
 
 
+# filter the escaped key
 sub dump
 {
 	my $ego = shift;
 	my $tmp = $ego->{t}->get();
 	$tmp =~ s/\r//g;
 	$tmp =~ s/$esc\[/\*\[/g;
-	print "\n=============================\n";
 	print decode('big5',$tmp);
-	print "\n=============================\n";
 }
 
 
 sub getscreen 
 {
 	my $ego = shift;
-	usleep( $buffer_delay );
-	my $str = $ego->{t}->get( Timeout => $buffer_timeout );
+	usleep( BUF_DELAY );
+	my $str = $ego->{t}->get( Timeout => BUF_TIMEOUT );
 	print $str = decode('Big5',$str);
 	return $str;
 }
@@ -113,10 +104,10 @@ sub init
 {
 	my $ego = shift;
 	$ego->{t} = Net::Telnet->new(
-			Port => 23,
-			Timeout => 30,
-			Errmode => \&error
-			);
+		Port => 23,
+		Timeout => 30,
+		Errmode => \&error
+	);
 	$ego->{t}->open( $ego->{host} );
 }
 
@@ -132,8 +123,7 @@ sub fetch_article_content {
 	my $ego = shift;
 	my $buf = '';
 	my $out = '';
-	my $p = 1;
-	my $l = 1;
+	my ($p,$l) = (1,1);
 	my $esc_jump_ptn = qr{$esc\[(\d+);1H};
 
 	my $buf2='';
@@ -142,6 +132,7 @@ sub fetch_article_content {
 	while( my $str = $ego->{t}->get() ) {
 		$buf2 .= $str;
 		my $buf_de = decode('Big5',$buf2);
+
 		if( $buf_de =~ $ego->{prompt}{browse_bar} ) {
 			print "($1)\r";
 			$ego->sendkey( $ego->{cmd}{next_page} );
@@ -181,10 +172,10 @@ sub fetch_article_content {
 		}
 	}
 	$out =~ s/($esc\[K
-				|\r
-				|$esc\[(\d*?;?)*m
-				|^$esc\[;H$esc\[2J
-			)//gx;
+	|\r
+	|$esc\[(\d*?;?)*m
+	|^$esc\[;H$esc\[2J
+	)//gx;
 	return $out;
 }
 
@@ -192,34 +183,45 @@ sub fetch_article_content {
 # public method declaration
 sub login 
 {
-	my $ego = shift;
-	my $user = shift;
-	my $pass = shift;
+	my ($ego,$user,$pass) = @_;
+
+	$ego->{user} = $user;
+	$ego->{pass} = $pass;
+
 	my $buf = '';
 	while( my $str = $ego->{t}->get() ) {
-
 		my $buf_de = decode('Big5' , $buf .= $str );
 
 		if ( $buf_de =~ $ego->{prompt}{userid} ) {
+			print "enter id\n";
 			$ego->sendkey( $user."\n");
 			$buf = '';
 		} 
 		elsif( $buf_de =~ $ego->{prompt}{passwd} ) {
+			print "enter password\n";
 			$ego->sendkey( $pass."\n");
 			$buf = '';
 		} 
 		elsif(  $buf_de =~ $ego->{prompt}{repeat_login}  ) {
+			print "skip killing other login\n";
 			$ego->sendkey( "n\n" );
 			$buf = '';
 		} 
 		elsif( $buf_de =~ $ego->{prompt}{press_any_key} ) {
+			print "pass\n";
 			$ego->sendkey( $ego->{cmd}{quit} );
 			$buf = '';
 		} 
 		elsif( $buf_de =~ $ego->{prompt}{hotboards} ) {
+			print "pass\n";
 			$ego->sendkey( $ego->{cmd}{quit});
 			$buf = '';
 		} 
+		elsif( $buf_de =~ $ego->{prompt}{guestbook} ) {
+			print "pass\n";
+			$ego->sendkey( $ego->{cmd}{quit});
+			$buf = '';
+		}
 		elsif( $buf_de =~ $ego->{prompt}{main_menu} ) {
 			print "get main menu\n";
 			$buf = '';
@@ -235,10 +237,10 @@ sub login
 			$buf = '';
 			return 0;
 		} 
-		elsif( $buf_de =~ m/您有.+?篇文章尚未完成/ ) {
-			$ego->sendkey("q\n"); # forget it
+		elsif( $buf_de =~ $ego->{prompt}{incomplete_article} ) {
+			$ego->sendkey("q\r"); # forget it
 			$buf = '';
-		}
+		} 
 	}
 }
 
@@ -252,15 +254,29 @@ sub enter_board
 	while( my $str = $ego->{t}->get() ) {
 		$buf .= $str;
 		my $buf_de = decode('big5' , $buf );
-		if ( $buf_de =~ $ego->{prompt}{press_any_key} ) {
+
+		if( $buf_de =~ $ego->{prompt}{article_list} )  {
+			return 1;
+		} 
+		elsif ( $buf_de =~ $ego->{prompt}{press_any_key} ) {
 			$ego->sendkey( $ego->{cmd}{quit} );
 			$buf = '';
-		}  elsif( $buf_de =~ $ego->{prompt}{article_list} )  {
+		} 
+		elsif ( $buf_de =~ $ego->{prompt}{browse_bar} ) {
+			$ego->sendkey( $ego->{cmd}{quit} );
 			$buf = '';
-			return 1;
 		}
 	}
 }
+
+sub query_id 
+{
+	my ($ego,$id)=@_;
+	$ego->sendkey("T\rQ\r");
+	$ego->sendkey("$id\r");
+
+}
+
 
 sub fetch_articles 
 {
@@ -336,33 +352,35 @@ sub listen_userlist
 	while(1) 
 	{
 		# send update key
-		usleep(3*10**5);
+		usleep( BUF_DELAY );
 		$ego->sendkey("s");
-
 		my $screen = $ego->read_screen( $ego->{prompt}{userlist_bar} );
 
 		# add id to current id list 
 		while( $screen =~ m{$ego->{prompt}{userlist_board_friend}}g )
 		{ 
 			my ( $gid , $gnick )=( $1, $2);
-			if ( ! exists( $all_ids{$gid} ) ) {
-				$all_ids{$gid} = 1;
+			if ( ! exists( $all_ids{$gid} )
+					and $gid ne $ego->{user} )
+			{
+				$all_ids{$gid} = 1 ;
 				$ego->userlist_write_log( 
 					'new guest' , 
 					( 'ID' => $gid , 'NICK' => $gnick )
 				);
-				print "new guest found \@ $ego->{board} : $gid ( $gnick ) \n";
-			}
-			$cur_ids{$gid}=1;
-		} 
 
+				print "new guest found \@ $ego->{board} : "
+				. "$gid ( $gnick ) \n";
+			}
+			$cur_ids{$gid} = 1 
+			if( $gid ne $ego->{user} );
+		} 
 
 		# update timestamp at first time	
 		$timestamp = time() if ( ! $timestamp );
 		if( time() - $timestamp > 2 )	# update current id list to last id list ( every 2 sec )
 		{
 			$timestamp = time();
-			use POSIX qw(strftime);
 			my $now_string = strftime "%a %b %e %H:%M:%S %Y", localtime;
 
 			# compare with last id list
@@ -371,8 +389,9 @@ sub listen_userlist
 				unless( $last_ids{ $id } ) {
 					# new join
 					$pad_ids{ $id } = $level;
-					for( 0 .. $pad_ids{ $id } ) { print "---|" ; }
-					print "  $id enter at $now_string  " . $all_ids{$id} . " times. \n";
+					print "   |" x $pad_ids{$id} ;
+					print "  $id enter at $now_string  " 
+					. $all_ids{$id} . " times. \n";
 					$all_ids{$id}++;
 					$level++;
 				}
@@ -381,12 +400,12 @@ sub listen_userlist
 			foreach my $id ( keys %last_ids ) 
 			{
 				unless ( $cur_ids{ $id } ) { 
-					for( 0 .. $pad_ids{ $id } ) { print "   |" ; }
+					print "   |" x $pad_ids{$id} ;
 					print "- $id leave at: $now_string \n";
 					$level--;
 				}
 			}
-			
+
 			# update last id list
 			%last_ids = %cur_ids;
 			foreach my $h ( keys %cur_ids ) { delete $cur_ids{$h}; }
@@ -397,15 +416,14 @@ sub listen_userlist
 
 sub wait_for
 {
-	my $ego = shift;
-	my $pattern = shift;
+	my ($ego,$pattern)=@_;
 	my $buf = '';
 	while( my $str = $ego->{t}->get() ) {
 		$buf .= $str;
 		my $buf2 = decode('Big5',$buf);
-		if( $buf2 =~ m{$pattern} ) {
-			return 1;
-		}
+
+		return 1 
+		if( $buf2 =~ m{$pattern} );
 	}
 }
 
@@ -414,7 +432,7 @@ sub conv_utf8_to_big5
 	my ($ego,$c) = @_;
 
 	# check if content is utf8 encoding
-	if( utf8::is_utf8( $c ) {
+	if( utf8::is_utf8( $c ) ) {
 		# convert encoding from utf8 to big5
 		# because BBS sytem use big5 encoding
 		my $enc = Text::Iconv->new("utf8", "big5");
@@ -430,7 +448,7 @@ sub conv_utf8_to_big5
 sub post_article
 {
 	my ($ego,$title,$content) = @_;
-	
+
 	# send post command	
 	$ego->sendkey(  $ego->{cmd}{article_post} );
 
@@ -439,39 +457,37 @@ sub post_article
 
 	# skip label
 	$ego->sendkey("\n");
-	
+
 	# send title
 	usleep( 2 * 10 ** 5 );
 	$ego->sendkey( $title . "\n" );
-	
+
 	# signature
 	$ego->sendkey("\n");
 	usleep( 2 * 10 ** 5 );
 	$ego->sendkey($content);
-	
+
 	usleep( 5 * 10 ** 5 );
 	$ego->sendkey(  $ego->{cmd}{article_menu} );
-	
+
 	usleep( 2 * 10 ** 5 );
 	$ego->sendkey(  $ego->{cmd}{article_save} );
-	
+
 	usleep( 2 * 10 ** 5 );
 	$ego->sendkey( $ego->{cmd}{next_page} );
-	#$ego->dump();
-	#return unless ( $ego->wait_for( $ego->{prompt}{article_posted} ) );
 
 	1;
 }
 
 sub error 
 {
-	print "error\n";
-	exit;
+	#print "error\n";
+	#exit;
 }
+
 1;
 __END__
 
-# Below is stub documentation for your module. You'd better edit it!
 
 =head1 NAME
 
